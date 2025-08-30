@@ -23,7 +23,7 @@ go.work
 /dist/
 
 # Environment variables
-.env
+# .env
 .env.local
 .env.development
 .env.test
