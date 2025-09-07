@@ -5,6 +5,7 @@ import (
 	"github.com/kgermando/appartment-app-api/controllers/appartments"
 	"github.com/kgermando/appartment-app-api/controllers/auth"
 	"github.com/kgermando/appartment-app-api/controllers/caisses"
+	"github.com/kgermando/appartment-app-api/controllers/dashboard"
 	"github.com/kgermando/appartment-app-api/controllers/users"
 
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -31,8 +32,7 @@ func Setup(app *fiber.App) {
 	// Users controller
 	u := api.Group("/users")
 	u.Get("/all", users.GetAllUsers)
-	u.Get("/all/paginate", users.GetPaginatedUsersManagerGeneral)
-	u.Get("/all/:bayer_uuid/paginate", users.GetPaginatedUsers)
+	u.Get("/all/paginate", users.GetPaginatedUsers)
 	u.Get("/all/:uuid", users.GetAllUsersByUUID)
 	u.Get("/get/:uuid", users.GetUser)
 	u.Post("/create", users.CreateUser)
@@ -66,5 +66,15 @@ func Setup(app *fiber.App) {
 	c.Get("/totals/global", caisses.GetGlobalTotals)
 	c.Get("/totals/manager/:manager_uuid", caisses.GetTotalsByManager)
 	c.Post("/convert", caisses.ConvertCurrency)
+
+	// Dashboard controller
+	d := api.Group("/dashboard")
+	d.Get("/stats", dashboard.GetDashboardStats)                        // Dashboard principal avec filtres
+	d.Get("/trends", dashboard.GetMonthlyTrends)                        // Tendances mensuelles
+	d.Get("/managers", dashboard.GetManagerComparison)                  // Comparaison entre managers
+	d.Get("/apartments/performance", dashboard.GetApartmentPerformance) // Performance des appartements
+	d.Get("/financial", dashboard.GetFinancialSummary)                  // Résumé financier détaillé
+	d.Get("/occupancy", dashboard.GetOccupancyStats)                    // Statistiques d'occupation
+	d.Get("/top-managers", dashboard.GetTopManagers)                    // Classement des meilleurs managers
 
 }

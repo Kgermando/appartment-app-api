@@ -77,8 +77,6 @@ func Login(c *fiber.Ctx) error {
 	u := &models.User{}
 
 	result := database.DB.Where("email = ? OR telephone = ?", lu.Identifier, lu.Identifier).
-		Preload("Entreprise").
-		Preload("Pos").
 		First(&u)
 
 	if result.Error != nil {
@@ -128,8 +126,6 @@ func AuthUser(c *fiber.Ctx) error {
 	u := models.User{}
 
 	database.DB.Where("users.uuid = ?", UserUUID).
-		Preload("Entreprise").
-		Preload("Pos").
 		First(&u)
 	r := &models.UserResponse{
 		UUID:       u.UUID,

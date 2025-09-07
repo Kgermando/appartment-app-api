@@ -32,12 +32,11 @@ type Appartment struct {
 
 	// Statut et disponibilité
 	Status    string `gorm:"default:'available'" json:"status"` // available, occupied, maintenance, unavailable
-	Available bool   `gorm:"default:true" json:"available"`     // Disponible ou non
 
 	// Gestionnaire/Agent responsable
 	ManagerUUID string `gorm:"type:varchar(255)" json:"manager_uuid"`
 	Manager     User   `gorm:"foreignKey:ManagerUUID;references:UUID" json:"manager"`
 
-	 // Relations inverses
-    Caisses []Caisse `gorm:"foreignKey:CaisseUUID" json:"caisses,omitempty"`
+	// Relations inverses
+	Caisses []Caisse `gorm:"foreignKey:AppartmentUUID;references:UUID" json:"caisses,omitempty"`
 }

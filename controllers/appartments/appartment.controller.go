@@ -2,6 +2,7 @@ package appartments
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/kgermando/appartment-app-api/database"
@@ -189,14 +190,35 @@ func GetAppartment(c *fiber.Ctx) error {
 
 // Create data
 func CreateAppartment(c *fiber.Ctx) error {
-	p := &models.Appartment{}
-
-	if err := c.BodyParser(&p); err != nil {
-		return err
+	// Define input struct with string for date field
+	type CreateAppartmentInput struct {
+		Name          string  `json:"name"`
+		Number        string  `json:"number"`
+		Surface       float64 `json:"surface"`
+		Rooms         int     `json:"rooms"`
+		Bathrooms     int     `json:"bathrooms"`
+		Balcony       bool    `json:"balcony"`
+		Furnished     bool    `json:"furnished"`
+		MonthlyRent   float64 `json:"monthly_rent"`
+		GarantieMonth float64 `json:"garantie_month"`
+		Garantie      float64 `json:"garantie_montant"`
+		Echeance      string  `json:"echeance"` // Accept as string
+		Status        string  `json:"status"`
+		ManagerUUID   string  `json:"manager_uuid"`
 	}
 
-	if p.Name == "" || p.Number == "" {
-		return c.Status(404).JSON(
+	var input CreateAppartmentInput
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to parse request body",
+			"error":   err.Error(),
+		})
+	}
+
+	if input.Name == "" || input.Number == "" {
+		return c.Status(400).JSON(
 			fiber.Map{
 				"status":  "error",
 				"message": "Form not complete - Name and Number are required",
@@ -205,21 +227,35 @@ func CreateAppartment(c *fiber.Ctx) error {
 		)
 	}
 
+	// Parse the date string
+	var echeanceDate time.Time
+	var err error
+	if input.Echeance != "" {
+		// Try to parse date in YYYY-MM-DD format
+		echeanceDate, err = time.Parse("2006-01-02", input.Echeance)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"status":  "error",
+				"message": "Invalid date format for echeance. Expected YYYY-MM-DD",
+				"error":   err.Error(),
+			})
+		}
+	}
+
 	appartment := &models.Appartment{
-		Name:          p.Name,
-		Number:        p.Number,
-		Surface:       p.Surface,
-		Rooms:         p.Rooms,
-		Bathrooms:     p.Bathrooms,
-		Balcony:       p.Balcony,
-		Furnished:     p.Furnished,
-		MonthlyRent:   p.MonthlyRent,
-		GarantieMonth: p.GarantieMonth,
-		Garantie:      p.Garantie,
-		Echeance:      p.Echeance,
-		Status:        p.Status,
-		Available:     p.Available,
-		ManagerUUID:   p.ManagerUUID,
+		Name:          input.Name,
+		Number:        input.Number,
+		Surface:       input.Surface,
+		Rooms:         input.Rooms,
+		Bathrooms:     input.Bathrooms,
+		Balcony:       input.Balcony,
+		Furnished:     input.Furnished,
+		MonthlyRent:   input.MonthlyRent,
+		GarantieMonth: input.GarantieMonth,
+		Garantie:      input.Garantie,
+		Echeance:      echeanceDate,
+		Status:        input.Status,
+		ManagerUUID:   input.ManagerUUID,
 	}
 
 	if err := utils.ValidateStruct(*appartment); err != nil {
@@ -256,21 +292,36 @@ func UpdateAppartment(c *fiber.Ctx) error {
 		MonthlyRent   float64 `json:"monthly_rent"`
 		GarantieMonth float64 `json:"garantie_month"`
 		Garantie      float64 `json:"garantie_montant"`
+		Echeance      string  `json:"echeance"` // Accept as string
 		Status        string  `json:"status"`
-		Available     bool    `json:"available"`
 		ManagerUUID   string  `json:"manager_uuid"`
 	}
 
 	var updateData UpdateDataInput
 
 	if err := c.BodyParser(&updateData); err != nil {
-		return c.Status(500).JSON(
+		return c.Status(400).JSON(
 			fiber.Map{
 				"status":  "error",
 				"message": "Review your input",
 				"data":    nil,
 			},
 		)
+	}
+
+	// Parse the date string if provided
+	var echeanceDate time.Time
+	var err error
+	if updateData.Echeance != "" {
+		// Try to parse date in YYYY-MM-DD format
+		echeanceDate, err = time.Parse("2006-01-02", updateData.Echeance)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"status":  "error",
+				"message": "Invalid date format for echeance. Expected YYYY-MM-DD",
+				"error":   err.Error(),
+			})
+		}
 	}
 
 	appartment := new(models.Appartment)
@@ -286,8 +337,10 @@ func UpdateAppartment(c *fiber.Ctx) error {
 	appartment.MonthlyRent = updateData.MonthlyRent
 	appartment.GarantieMonth = updateData.GarantieMonth
 	appartment.Garantie = updateData.Garantie
+	if updateData.Echeance != "" {
+		appartment.Echeance = echeanceDate
+	}
 	appartment.Status = updateData.Status
-	appartment.Available = updateData.Available
 	appartment.ManagerUUID = updateData.ManagerUUID
 
 	db.Save(&appartment)

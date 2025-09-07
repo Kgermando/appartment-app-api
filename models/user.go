@@ -18,7 +18,7 @@ type User struct {
 	Telephone       string     `gorm:"unique; not null" json:"telephone"`
 	Password        string     `json:"password" validate:"required"`
 	PasswordConfirm string     `json:"password_confirm" gorm:"-"`
-	Role            string     `json:"role"` // Bayer, Superviseur, Big-chief
+	Role            string     `json:"role"` // Agent, Manager, Supervisor, Administrator
 	Permission      string     `json:"permission"`
 	Status          bool       `gorm:"default:false" json:"status"`
 	Signature       string     `json:"signature"` 
