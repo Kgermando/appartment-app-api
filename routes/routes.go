@@ -19,6 +19,7 @@ func Setup(app *fiber.App) {
 	a := api.Group("/auth")
 	a.Post("/register", auth.Register)
 	a.Post("/login", auth.Login)
+	a.Post("/create-admin", auth.CreateAdminUser) // Nouveau endpoint pour créer un admin
 	a.Post("/forgot-password", auth.ForgotPassword)
 	a.Post("/reset/:token", auth.ResetPassword)
 

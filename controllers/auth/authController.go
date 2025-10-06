@@ -14,6 +14,114 @@ import (
 
 var SECRET_KEY string = os.Getenv("SECRET_KEY")
 
+// ensureAdminUser vérifie si un utilisateur admin existe, sinon en crée un
+func ensureAdminUser() error {
+	var adminUser models.User
+
+	// Vérifier si un utilisateur avec le rôle Administrator existe
+	result := database.DB.Where("role = ?", "Admin").First(&adminUser)
+
+	if result.Error == nil {
+		// Un admin existe déjà
+		return nil
+	}
+
+	// Créer un utilisateur admin par défaut
+	defaultAdmin := &models.User{
+		UUID:       uuid.New().String(),
+		Fullname:   "Super Admin",
+		Email:      "admin@appartment-app.com",
+		Telephone:  "+243000000000",
+		Role:       "Admin",
+		Permission: "ALL",
+		Status:     true,
+		Signature:  "Super Administrator",
+	}
+
+	// Définir un mot de passe par défaut (vous devriez le changer)
+	defaultAdmin.SetPassword("Admin@123")
+
+	// Sauvegarder l'admin en base de données
+	if err := database.DB.Create(defaultAdmin).Error; err != nil {
+		return fmt.Errorf("erreur lors de la création de l'admin par défaut: %v", err)
+	}
+
+	fmt.Println("Utilisateur admin créé avec succès:")
+	fmt.Printf("Email: %s\n", defaultAdmin.Email)
+	fmt.Printf("Téléphone: %s\n", defaultAdmin.Telephone)
+	fmt.Println("Mot de passe: Admin@123")
+	fmt.Println("⚠️  IMPORTANT: Changez le mot de passe par défaut après la première connexion!")
+
+	return nil
+}
+
+// CreateAdminUser endpoint pour créer manuellement un utilisateur admin
+func CreateAdminUser(c *fiber.Ctx) error {
+	type AdminInput struct {
+		Fullname  string `json:"fullname" validate:"required"`
+		Email     string `json:"email" validate:"required,email"`
+		Telephone string `json:"telephone" validate:"required"`
+		Password  string `json:"password" validate:"required,min=6"`
+	}
+
+	adminInput := new(AdminInput)
+
+	if err := c.BodyParser(&adminInput); err != nil {
+		c.Status(400)
+		return c.JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	if err := utils.ValidateStruct(*adminInput); err != nil {
+		c.Status(400)
+		return c.JSON(err)
+	}
+
+	// Vérifier si un admin existe déjà avec cet email ou téléphone
+	var existingUser models.User
+	result := database.DB.Where("email = ? OR telephone = ?", adminInput.Email, adminInput.Telephone).First(&existingUser)
+	if result.Error == nil {
+		c.Status(400)
+		return c.JSON(fiber.Map{
+			"message": "Un utilisateur avec cet email ou téléphone existe déjà",
+		})
+	}
+
+	// Créer le nouvel admin
+	newAdmin := &models.User{
+		UUID:       uuid.New().String(),
+		Fullname:   adminInput.Fullname,
+		Email:      adminInput.Email,
+		Telephone:  adminInput.Telephone,
+		Role:       "Admin",
+		Permission: "ALL",
+		Status:     true,
+		Signature:  "Admin",
+	}
+
+	newAdmin.SetPassword(adminInput.Password)
+
+	if err := database.DB.Create(newAdmin).Error; err != nil {
+		c.Status(500)
+		return c.JSON(fiber.Map{
+			"message": "Erreur lors de la création de l'admin",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Utilisateur admin créé avec succès",
+		"data": fiber.Map{
+			"uuid":      newAdmin.UUID,
+			"fullname":  newAdmin.Fullname,
+			"email":     newAdmin.Email,
+			"telephone": newAdmin.Telephone,
+			"role":      newAdmin.Role,
+		},
+	})
+}
+
 func Register(c *fiber.Ctx) error {
 
 	nu := new(models.User)
@@ -59,6 +167,11 @@ func Register(c *fiber.Ctx) error {
 }
 
 func Login(c *fiber.Ctx) error {
+	// S'assurer qu'un utilisateur admin existe
+	if err := ensureAdminUser(); err != nil {
+		fmt.Printf("Erreur lors de la vérification/création de l'admin: %v\n", err)
+		// On continue le processus de login même si la création de l'admin échoue
+	}
 
 	lu := new(models.Login)
 
