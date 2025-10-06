@@ -681,7 +681,7 @@ func getManagerStats(db *gorm.DB, startDate, endDate string) []ManagerStats {
 	query += `
 		GROUP BY u.uuid, u.fullname
 		HAVING COUNT(DISTINCT a.uuid) > 0
-		ORDER BY total_income_cdf + total_income_usd DESC
+		ORDER BY COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_cdf ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_usd ELSE 0 END), 0) DESC
 	`
 
 	rows, err := db.Raw(query, args...).Rows()

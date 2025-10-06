@@ -298,11 +298,6 @@ func CreateCaisse(c *fiber.Ctx) error {
 		Signature:      p.Signature,
 	}
 
-	if err := utils.ValidateStruct(*caisse); err != nil {
-		c.Status(400)
-		return c.JSON(err)
-	}
-
 	caisse.UUID = utils.GenerateUUID()
 
 	database.DB.Create(caisse)
