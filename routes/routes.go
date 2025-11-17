@@ -32,9 +32,9 @@ func Setup(app *fiber.App) {
 
 	// Users controller
 	u := api.Group("/users")
+	u.Get("/all/paginate", users.GetPaginatedUsers) // Route statique en premier
+	u.Get("/all/:uuid", users.GetAllUsersByUUID)    // Route dynamique après
 	u.Get("/all", users.GetAllUsers)
-	u.Get("/all/paginate", users.GetPaginatedUsers)
-	u.Get("/all/:uuid", users.GetAllUsersByUUID)
 	u.Get("/get/:uuid", users.GetUser)
 	u.Post("/create", users.CreateUser)
 	u.Put("/update/:uuid", users.UpdateUser)
@@ -42,10 +42,11 @@ func Setup(app *fiber.App) {
 
 	// Appartments controller
 	ap := api.Group("/appartments")
+	ap.Get("/all/paginate", appartments.GetPaginatedAppartmentsManagerGeneral) // Route statique en premier
+	ap.Get("/all/:manager_uuid/paginate", appartments.GetPaginatedAppartments) // Route avec paramètre + suffixe
+	ap.Get("/all/:manager_uuid", appartments.GetAllAppartmentsByManagerUUID)   // Route dynamique seule
 	ap.Get("/all", appartments.GetAllAppartments)
-	ap.Get("/all/paginate", appartments.GetPaginatedAppartmentsManagerGeneral)
-	ap.Get("/all/:manager_uuid/paginate", appartments.GetPaginatedAppartments)
-	ap.Get("/all/:manager_uuid", appartments.GetAllAppartmentsByManagerUUID)
+	ap.Get("/stats/:uuid", appartments.GetAppartmentStats) // Route statique "stats" avant "get"
 	ap.Get("/get/:uuid", appartments.GetAppartment)
 	ap.Post("/create", appartments.CreateAppartment)
 	ap.Put("/update/:uuid", appartments.UpdateAppartment)
@@ -53,19 +54,19 @@ func Setup(app *fiber.App) {
 
 	// Caisses controller
 	c := api.Group("/caisses")
+	c.Get("/all/paginate", caisses.GetPaginatedCaissesManagerGeneral)     // Route statique en premier
+	c.Get("/all/:appartment_uuid/paginate", caisses.GetPaginatedCaisses)  // Route avec paramètre + suffixe
+	c.Get("/all/:appartment_uuid", caisses.GetAllCaissesByAppartmentUUID) // Route dynamique seule
 	c.Get("/all", caisses.GetAllCaisses)
-	c.Get("/all/paginate", caisses.GetPaginatedCaissesManagerGeneral)
-	c.Get("/all/:appartment_uuid/paginate", caisses.GetPaginatedCaisses)
-	c.Get("/all/:appartment_uuid", caisses.GetAllCaissesByAppartmentUUID)
 	c.Get("/get/:uuid", caisses.GetCaisse)
 	c.Post("/create", caisses.CreateCaisse)
 	c.Put("/update/:uuid", caisses.UpdateCaisse)
 	c.Delete("/delete/:uuid", caisses.DeleteCaisse)
 
 	// Financial endpoints
+	c.Get("/totals/global", caisses.GetGlobalTotals)                   // Route statique en premier
+	c.Get("/totals/manager/:manager_uuid", caisses.GetTotalsByManager) // Route avec paramètre après
 	c.Get("/balance/:appartment_uuid", caisses.GetAppartmentBalance)
-	c.Get("/totals/global", caisses.GetGlobalTotals)
-	c.Get("/totals/manager/:manager_uuid", caisses.GetTotalsByManager)
 	c.Post("/convert", caisses.ConvertCurrency)
 
 	// Dashboard controller

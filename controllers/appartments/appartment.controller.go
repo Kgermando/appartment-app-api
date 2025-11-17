@@ -188,6 +188,113 @@ func GetAppartment(c *fiber.Ctx) error {
 	)
 }
 
+// Get appartment payment statistics by month
+func GetAppartmentStats(c *fiber.Ctx) error {
+	uuid := c.Params("uuid")
+	db := database.DB
+
+	// Vérifier si l'appartement existe
+	var appartment models.Appartment
+	if err := db.Where("uuid = ?", uuid).First(&appartment).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Appartment not found",
+			"data":    nil,
+		})
+	}
+
+	// Obtenir l'année courante ou depuis les paramètres de requête
+	year := time.Now().Year()
+	if yearParam := c.Query("year"); yearParam != "" {
+		if parsedYear, err := strconv.Atoi(yearParam); err == nil && parsedYear > 0 {
+			year = parsedYear
+		}
+	}
+
+	// Initialiser les statistiques pour les 12 mois
+	monthlyStats := make(map[string]map[string]float64)
+	months := []string{"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December"}
+
+	for _, month := range months {
+		monthlyStats[month] = map[string]float64{
+			"total_cdf": 0.0,
+			"total_usd": 0.0,
+		}
+	}
+
+	// Récupérer toutes les entrées (Income) de la caisse pour cet appartement
+	var caisses []models.Caisse
+	startDate := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(year, 12, 31, 23, 59, 59, 0, time.UTC)
+
+	err := db.Where("appartment_uuid = ? AND type = ? AND created_at >= ? AND created_at <= ?",
+		uuid, "Income", startDate, endDate).Find(&caisses).Error
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to fetch payment statistics",
+			"error":   err.Error(),
+		})
+	}
+
+	// Calculer les totaux par mois
+	for _, caisse := range caisses {
+		monthIndex := int(caisse.CreatedAt.Month()) - 1
+		if monthIndex >= 0 && monthIndex < 12 {
+			monthName := months[monthIndex]
+			monthlyStats[monthName]["total_cdf"] += caisse.DeviceCDF
+			monthlyStats[monthName]["total_usd"] += caisse.DeviceUSD
+		}
+	}
+
+	// Calculer les totaux annuels
+	var totalYearCDF, totalYearUSD float64
+	for _, month := range months {
+		totalYearCDF += monthlyStats[month]["total_cdf"]
+		totalYearUSD += monthlyStats[month]["total_usd"]
+	}
+
+	// Préparer la réponse
+	response := map[string]interface{}{
+		"appartment_info": map[string]interface{}{
+			"uuid":           appartment.UUID,
+			"created_at":     appartment.CreatedAt,
+			"updated_at":     appartment.UpdatedAt,
+			"name":           appartment.Name,
+			"number":         appartment.Number,
+			"surface":        appartment.Surface,
+			"rooms":          appartment.Rooms,
+			"bathrooms":      appartment.Bathrooms,
+			"balcony":        appartment.Balcony,
+			"furnished":      appartment.Furnished,
+			"monthly_rent":   appartment.MonthlyRent,
+			"garantie_month": appartment.GarantieMonth,
+			"garantie":       appartment.Garantie,
+			"echeance":       appartment.Echeance,
+			"status":         appartment.Status,
+			"manager_uuid":   appartment.ManagerUUID,
+		},
+		"year":          year,
+		"monthly_stats": monthlyStats,
+		"yearly_totals": map[string]float64{
+			"total_cdf": totalYearCDF,
+			"total_usd": totalYearUSD,
+		},
+		"currency_info": map[string]string{
+			"cdf": "Francs Congolais",
+			"usd": "US Dollars",
+		},
+	}
+
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"message": "Appartment payment statistics retrieved successfully",
+		"data":    response,
+	})
+}
+
 // Create data
 func CreateAppartment(c *fiber.Ctx) error {
 	// Define input struct with string for date field
