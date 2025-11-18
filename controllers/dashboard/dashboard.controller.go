@@ -7,205 +7,348 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/kgermando/appartment-app-api/database"
 	"github.com/kgermando/appartment-app-api/models"
-	"gorm.io/gorm"
 )
 
-type DashboardStats struct {
-	// Statistiques générales
-	TotalAppartments      int64 `json:"total_apartments"`
-	AvailableApartments   int64 `json:"available_apartments"`
-	OccupiedApartments    int64 `json:"occupied_apartments"`
-	MaintenanceApartments int64 `json:"maintenance_apartments"`
-
-	// Statistiques financières
-	TotalIncomeUSD  float64 `json:"total_income_usd"`
-	TotalExpenseUSD float64 `json:"total_expense_usd"`
-	NetBalanceUSD   float64 `json:"net_balance_usd"`
-
-	// Statistiques de revenus
-	MonthlyRevenueTarget float64 `json:"monthly_revenue_target"`
-	ActualMonthlyRevenue float64 `json:"actual_monthly_revenue"`
-	RevenuePercentage    float64 `json:"revenue_percentage"`
-
-	// Top appartements
-	TopApartmentsByRevenue []ApartmentRevenue `json:"top_apartments_by_revenue"`
-
-	// Statistiques par manager
-	ManagerStats []ManagerStats `json:"manager_stats"`
-}
-
-type ApartmentRevenue struct {
-	UUID         string  `json:"uuid"`
-	Name         string  `json:"name"`
-	Number       string  `json:"number"`
-	MonthlyRent  float64 `json:"monthly_rent"`
-	TotalRevenue float64 `json:"total_revenue"`
-	Status       string  `json:"status"`
-	ManagerName  string  `json:"manager_name"`
-}
-
-type ManagerStats struct {
-	ManagerUUID          string  `json:"manager_uuid"`
-	ManagerName          string  `json:"manager_name"`
-	TotalApartments      int64   `json:"total_apartments"`
-	AvailableApartments  int64   `json:"available_apartments"`
-	OccupiedApartments   int64   `json:"occupied_apartments"`
-	TotalIncomeUSD       float64 `json:"total_income_usd"`
-	TotalExpenseUSD      float64 `json:"total_expense_usd"`
-	NetBalanceUSD        float64 `json:"net_balance_usd"`
-	MonthlyRevenueTarget float64 `json:"monthly_revenue_target"`
-}
-
-type MonthlyTrend struct {
-	Month      string  `json:"month"`
-	Year       int     `json:"year"`
-	IncomeUSD  float64 `json:"income_usd"`
-	ExpenseUSD float64 `json:"expense_usd"`
-}
-
-// GetDashboardStats - Dashboard principal avec possibilité de filtrer par manager
 func GetDashboardStats(c *fiber.Ctx) error {
 	db := database.DB
 
-	// Parse des paramètres de filtrage
-	managerUUID := c.Query("manager_uuid", "")
+	// Parse query parameters (tous optionnels)
+	userUUID := c.Query("user_uuid", "")
 	startDate := c.Query("start_date", "")
 	endDate := c.Query("end_date", "")
 
-	var stats DashboardStats
+	var stats models.DashboardStats
 
-	// Construire la requête de base pour les appartements
-	apartmentQuery := db.Model(&models.Appartment{})
-	if managerUUID != "" {
-		apartmentQuery = apartmentQuery.Where("manager_uuid = ?", managerUUID)
+	// 1. Statistiques générales des appartements
+	apartmentBaseQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		apartmentBaseQuery = apartmentBaseQuery.Where("manager_uuid = ?", userUUID)
 	}
 
-	// Statistiques des appartements
-	apartmentQuery.Count(&stats.TotalAppartments)
+	// Clone queries for each status
+	apartmentBaseQuery.Count(&stats.TotalAppartments)
 
-	apartmentQuery.Where("status = ?", "available").Count(&stats.AvailableApartments)
-	apartmentQuery.Where("status = ?", "occupied").Count(&stats.OccupiedApartments)
-	apartmentQuery.Where("status = ?", "maintenance").Count(&stats.MaintenanceApartments)
-
-	// Calculer le revenu mensuel cible
-	var monthlyRevenueTarget float64
-	db.Model(&models.Appartment{}).
-		Select("COALESCE(SUM(monthly_rent), 0)").
-		Where("manager_uuid = ? OR ? = ''", managerUUID, managerUUID).
-		Row().Scan(&monthlyRevenueTarget)
-	stats.MonthlyRevenueTarget = monthlyRevenueTarget
-
-	// Construire la requête pour les caisses avec filtres de date
-	caisseQuery := db.Model(&models.Caisse{})
-
-	// Jointure avec appartments pour filtrer par manager si nécessaire
-	if managerUUID != "" {
-		caisseQuery = caisseQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-			Where("appartments.manager_uuid = ?", managerUUID)
+	availableQuery := db.Model(&models.Appartment{}).Where("status = ?", "available")
+	if userUUID != "" {
+		availableQuery = availableQuery.Where("manager_uuid = ?", userUUID)
 	}
+	availableQuery.Count(&stats.AvailableApartments)
 
-	// Ajouter les filtres de date
+	occupiedQuery := db.Model(&models.Appartment{}).Where("status = ?", "occupied")
+	if userUUID != "" {
+		occupiedQuery = occupiedQuery.Where("manager_uuid = ?", userUUID)
+	}
+	occupiedQuery.Count(&stats.OccupiedApartments)
+
+	maintenanceQuery := db.Model(&models.Appartment{}).Where("status = ?", "maintenance")
+	if userUUID != "" {
+		maintenanceQuery = maintenanceQuery.Where("manager_uuid = ?", userUUID)
+	}
+	maintenanceQuery.Count(&stats.MaintenanceApartments)
+
+	// 2. Statistiques financières en USD avec filtres optionnels
+	var totalIncomeUSD, totalExpenseUSD float64
+
+	// Build income query (filtre par user_uuid et dates si fournis)
+	incomeQuery := db.Model(&models.Caisse{}).Where("type = ?", "Income")
+	if userUUID != "" {
+		incomeQuery = incomeQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ?", userUUID)
+	}
 	if startDate != "" {
 		if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
-			caisseQuery = caisseQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			incomeQuery = incomeQuery.Where("caisses.created_at >= ?", parsedStartDate)
 		}
 	}
 	if endDate != "" {
 		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
 			endDateTime := parsedEndDate.Add(24 * time.Hour)
-			caisseQuery = caisseQuery.Where("caisses.created_at < ?", endDateTime)
+			incomeQuery = incomeQuery.Where("caisses.created_at < ?", endDateTime)
 		}
 	}
+	incomeQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalIncomeUSD)
 
-	// Calculer les revenus et dépenses (USD uniquement)
-	caisseQuery.Where("caisses.type = ?", "Income").
-		Select("COALESCE(SUM(device_usd), 0)").
-		Row().Scan(&stats.TotalIncomeUSD)
-
-	caisseQuery.Where("caisses.type = ?", "Expense").
-		Select("COALESCE(SUM(device_usd), 0)").
-		Row().Scan(&stats.TotalExpenseUSD)
-
-	// Calculer la balance nette
-	stats.NetBalanceUSD = stats.TotalIncomeUSD - stats.TotalExpenseUSD
-
-	// Calculer le revenu mensuel actuel (revenus du mois en cours)
-	var actualMonthlyRevenue float64
-
-	monthlyQuery := db.Model(&models.Caisse{}).
-		Where("type = ? AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)", "Income")
-
-	if managerUUID != "" {
-		monthlyQuery = monthlyQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-			Where("appartments.manager_uuid = ?", managerUUID)
+	// Build expense query (filtre par user_uuid et dates si fournis)
+	expenseQuery := db.Model(&models.Caisse{}).Where("type = ?", "Expense")
+	if userUUID != "" {
+		expenseQuery = expenseQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ?", userUUID)
 	}
+	if startDate != "" {
+		if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+			expenseQuery = expenseQuery.Where("caisses.created_at >= ?", parsedStartDate)
+		}
+	}
+	if endDate != "" {
+		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+			endDateTime := parsedEndDate.Add(24 * time.Hour)
+			expenseQuery = expenseQuery.Where("caisses.created_at < ?", endDateTime)
+		}
+	}
+	expenseQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalExpenseUSD)
 
-	monthlyQuery.Select("COALESCE(SUM(device_usd), 0)").
-		Row().Scan(&actualMonthlyRevenue)
+	stats.TotalIncomeUSD = totalIncomeUSD
+	stats.TotalExpenseUSD = totalExpenseUSD
+	stats.NetBalanceUSD = totalIncomeUSD - totalExpenseUSD
 
-	stats.ActualMonthlyRevenue = actualMonthlyRevenue
+	// 3. Statistiques de revenus mensuels
+	revenueQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		revenueQuery = revenueQuery.Where("manager_uuid = ?", userUUID)
+	}
+	revenueQuery.Select("COALESCE(SUM(monthly_rent), 0)").Row().Scan(&stats.MonthlyRevenueTarget)
 
-	// Calculer le pourcentage de réalisation
+	stats.ActualMonthlyRevenue = totalIncomeUSD
+
+	// Calculer le pourcentage de revenus atteint
 	if stats.MonthlyRevenueTarget > 0 {
 		stats.RevenuePercentage = (stats.ActualMonthlyRevenue / stats.MonthlyRevenueTarget) * 100
-	}
-
-	// Top appartements par revenus
-	stats.TopApartmentsByRevenue = getTopApartmentsByRevenue(db, managerUUID, startDate, endDate)
-
-	// Statistiques par manager (seulement si pas de filtre manager spécifique)
-	if managerUUID == "" {
-		stats.ManagerStats = getManagerStats(db, startDate, endDate)
+	} else {
+		stats.RevenuePercentage = 0
 	}
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
-		"message": "Dashboard stats retrieved successfully",
+		"message": "Dashboard statistics retrieved successfully",
 		"data":    stats,
 	})
 }
 
-// GetMonthlyTrends - Tendances mensuelles des revenus et dépenses
+// GetApartmentRevenues returns revenue statistics for each apartment
+func GetApartmentRevenues(c *fiber.Ctx) error {
+	db := database.DB
+
+	// Parse query parameters
+	userUUID := c.Query("user_uuid", "")
+	startDate := c.Query("start_date", "")
+	endDate := c.Query("end_date", "")
+
+	// Build apartment query
+	apartmentQuery := db.Preload("Manager")
+	if userUUID != "" {
+		apartmentQuery = apartmentQuery.Where("manager_uuid = ?", userUUID)
+	}
+
+	var apartments []models.Appartment
+	apartmentQuery.Find(&apartments)
+
+	var revenues []models.ApartmentRevenue
+
+	for _, apt := range apartments {
+		var totalRevenue float64
+
+		// Build revenue query with date filters
+		revenueQuery := db.Model(&models.Caisse{}).
+			Where("appartment_uuid = ? AND type = ?", apt.UUID, "Income")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				revenueQuery = revenueQuery.Where("created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				revenueQuery = revenueQuery.Where("created_at < ?", endDateTime)
+			}
+		}
+
+		revenueQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalRevenue)
+
+		revenue := models.ApartmentRevenue{
+			UUID:         apt.UUID,
+			Name:         apt.Name,
+			Number:       apt.Number,
+			MonthlyRent:  apt.MonthlyRent,
+			TotalRevenue: totalRevenue,
+			Status:       apt.Status,
+			ManagerName:  apt.Manager.Fullname,
+		}
+
+		revenues = append(revenues, revenue)
+	}
+
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"message": "Apartment revenues retrieved successfully",
+		"data":    revenues,
+	})
+}
+
+// GetManagerStats returns statistics grouped by manager
+func GetManagerStats(c *fiber.Ctx) error {
+	db := database.DB
+
+	// Parse query parameters
+	userUUID := c.Query("user_uuid", "")
+	startDate := c.Query("start_date", "")
+	endDate := c.Query("end_date", "")
+
+	// Build manager query
+	managerQuery := db.Where("role IN ?", []string{"Manager"})
+	if userUUID != "" {
+		managerQuery = managerQuery.Where("uuid = ?", userUUID)
+	}
+
+	var managers []models.User
+	managerQuery.Find(&managers)
+
+	var managerStats []models.ManagerStats
+
+	for _, manager := range managers {
+		var stats models.ManagerStats
+		stats.ManagerUUID = manager.UUID
+		stats.ManagerName = manager.Fullname
+
+		// Count apartments by status for this manager
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ?", manager.UUID).
+			Count(&stats.TotalApartments)
+
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ? AND status = ?", manager.UUID, "available").
+			Count(&stats.AvailableApartments)
+
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ? AND status = ?", manager.UUID, "occupied").
+			Count(&stats.OccupiedApartments)
+
+		// Calculate financial stats for this manager with date filters
+		var totalIncomeUSD, totalExpenseUSD float64
+
+		// Income query
+		incomeQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Income")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				incomeQuery = incomeQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				incomeQuery = incomeQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		incomeQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalIncomeUSD)
+
+		// Expense query
+		expenseQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Expense")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				expenseQuery = expenseQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				expenseQuery = expenseQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		expenseQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalExpenseUSD)
+
+		stats.TotalIncomeUSD = totalIncomeUSD
+		stats.TotalExpenseUSD = totalExpenseUSD
+		stats.NetBalanceUSD = totalIncomeUSD - totalExpenseUSD
+
+		// Calculate monthly revenue target
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ?", manager.UUID).
+			Select("COALESCE(SUM(monthly_rent), 0)").
+			Row().Scan(&stats.MonthlyRevenueTarget)
+
+		managerStats = append(managerStats, stats)
+	}
+
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"message": "Manager statistics retrieved successfully",
+		"data":    managerStats,
+	})
+}
+
+// GetMonthlyTrends returns income and expense trends by month
 func GetMonthlyTrends(c *fiber.Ctx) error {
 	db := database.DB
 
-	managerUUID := c.Query("manager_uuid", "")
-	months := c.Query("months", "12") // Par défaut 12 mois
+	// Parse query parameters
+	userUUID := c.Query("user_uuid", "")
+	startDate := c.Query("start_date", "")
+	endDate := c.Query("end_date", "")
 
-	monthsInt, err := strconv.Atoi(months)
-	if err != nil || monthsInt <= 0 {
-		monthsInt = 12
+	// Get year from query parameter, default to current year
+	year := time.Now().Year()
+	if yearParam := c.Query("year"); yearParam != "" {
+		if parsedYear, err := strconv.Atoi(yearParam); err == nil && parsedYear > 0 {
+			year = parsedYear
+		}
 	}
 
-	var trends []MonthlyTrend
+	var trends []models.MonthlyTrend
 
-	// Calculer les tendances pour les X derniers mois
-	for i := monthsInt - 1; i >= 0; i-- {
-		date := time.Now().AddDate(0, -i, 0)
+	// Loop through each month
+	for month := 1; month <= 12; month++ {
+		monthStartDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+		monthEndDate := monthStartDate.AddDate(0, 1, 0).Add(-time.Second)
 
-		var trend MonthlyTrend
-		trend.Month = date.Format("2006-01")
-		trend.Year = date.Year()
+		// Apply custom date range if provided
+		actualStartDate := monthStartDate
+		actualEndDate := monthEndDate
 
-		// Requête de base pour le mois
-		query := db.Model(&models.Caisse{}).
-			Where("DATE_TRUNC('month', created_at) = ?", date.Format("2006-01-01"))
-
-		// Ajouter filtre manager si nécessaire
-		if managerUUID != "" {
-			query = query.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-				Where("appartments.manager_uuid = ?", managerUUID)
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				if parsedStartDate.After(monthStartDate) {
+					actualStartDate = parsedStartDate
+				}
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				parsedEndDateTime := parsedEndDate.Add(24 * time.Hour)
+				if parsedEndDateTime.Before(monthEndDate) {
+					actualEndDate = parsedEndDateTime
+				}
+			}
 		}
 
-		// Revenus du mois
-		query.Where("caisses.type = ?", "Income").
-			Select("COALESCE(SUM(device_usd), 0)").
-			Row().Scan(&trend.IncomeUSD)
+		// Skip month if it's outside the date range
+		if actualStartDate.After(actualEndDate) {
+			continue
+		}
 
-		// Dépenses du mois
-		query.Where("caisses.type = ?", "Expense").
-			Select("COALESCE(SUM(device_usd), 0)").
-			Row().Scan(&trend.ExpenseUSD)
+		var incomeUSD, expenseUSD float64
+
+		// Income query
+		incomeQuery := db.Model(&models.Caisse{}).
+			Where("type = ? AND created_at >= ? AND created_at <= ?", "Income", actualStartDate, actualEndDate)
+
+		if userUUID != "" {
+			incomeQuery = incomeQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+				Where("appartments.manager_uuid = ?", userUUID)
+		}
+		incomeQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&incomeUSD)
+
+		// Expense query
+		expenseQuery := db.Model(&models.Caisse{}).
+			Where("type = ? AND created_at >= ? AND created_at <= ?", "Expense", actualStartDate, actualEndDate)
+
+		if userUUID != "" {
+			expenseQuery = expenseQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+				Where("appartments.manager_uuid = ?", userUUID)
+		}
+		expenseQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&expenseUSD)
+
+		trend := models.MonthlyTrend{
+			Month:      time.Month(month).String(),
+			Year:       year,
+			IncomeUSD:  incomeUSD,
+			ExpenseUSD: expenseUSD,
+		}
 
 		trends = append(trends, trend)
 	}
@@ -217,449 +360,284 @@ func GetMonthlyTrends(c *fiber.Ctx) error {
 	})
 }
 
-// GetManagerComparison - Comparaison entre tous les managers
-func GetManagerComparison(c *fiber.Ctx) error {
-	db := database.DB
-
-	startDate := c.Query("start_date", "")
-	endDate := c.Query("end_date", "")
-
-	managerStats := getManagerStats(db, startDate, endDate)
-
-	return c.JSON(fiber.Map{
-		"status":  "success",
-		"message": "Manager comparison retrieved successfully",
-		"data":    managerStats,
-	})
-}
-
-// GetApartmentPerformance - Performance détaillée des appartements
-func GetApartmentPerformance(c *fiber.Ctx) error {
-	db := database.DB
-
-	managerUUID := c.Query("manager_uuid", "")
-	startDate := c.Query("start_date", "")
-	endDate := c.Query("end_date", "")
-	limit := c.Query("limit", "20")
-
-	limitInt, err := strconv.Atoi(limit)
-	if err != nil || limitInt <= 0 {
-		limitInt = 20
-	}
-
-	apartmentPerformance := getTopApartmentsByRevenue(db, managerUUID, startDate, endDate)
-
-	// Limiter les résultats
-	if len(apartmentPerformance) > limitInt {
-		apartmentPerformance = apartmentPerformance[:limitInt]
-	}
-
-	return c.JSON(fiber.Map{
-		"status":  "success",
-		"message": "Apartment performance retrieved successfully",
-		"data":    apartmentPerformance,
-	})
-}
-
-// GetFinancialSummary - Résumé financier détaillé
-func GetFinancialSummary(c *fiber.Ctx) error {
-	db := database.DB
-
-	managerUUID := c.Query("manager_uuid", "")
-	period := c.Query("period", "month") // month, quarter, year
-
-	var summary fiber.Map
-
-	switch period {
-	case "month":
-		summary = getMonthlyFinancialSummary(db, managerUUID)
-	case "quarter":
-		summary = getQuarterlyFinancialSummary(db, managerUUID)
-	case "year":
-		summary = getYearlyFinancialSummary(db, managerUUID)
-	default:
-		summary = getMonthlyFinancialSummary(db, managerUUID)
-	}
-
-	return c.JSON(fiber.Map{
-		"status":  "success",
-		"message": "Financial summary retrieved successfully",
-		"data":    summary,
-	})
-}
-
-// GetOccupancyStats - Statistiques d'occupation
+// GetOccupancyStats returns detailed occupancy statistics
 func GetOccupancyStats(c *fiber.Ctx) error {
 	db := database.DB
 
-	managerUUID := c.Query("manager_uuid", "")
+	// Parse query parameters
+	userUUID := c.Query("user_uuid", "")
 
-	type OccupancyStats struct {
-		TotalApartments       int64   `json:"total_apartments"`
-		OccupiedApartments    int64   `json:"occupied_apartments"`
-		AvailableApartments   int64   `json:"available_apartments"`
-		MaintenanceApartments int64   `json:"maintenance_apartments"`
-		OccupancyRate         float64 `json:"occupancy_rate"`
-		AvailabilityRate      float64 `json:"availability_rate"`
-		AverageRent           float64 `json:"average_rent"`
-		TotalPotentialRevenue float64 `json:"total_potential_revenue"`
-		LostRevenue           float64 `json:"lost_revenue"`
+	var stats models.OccupancyStats
+
+	// Build base query with user filter
+	baseQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		baseQuery = baseQuery.Where("manager_uuid = ?", userUUID)
 	}
 
-	var stats OccupancyStats
+	// Count apartments by status
+	baseQuery.Count(&stats.TotalApartments)
 
-	// Requête de base
-	query := db.Model(&models.Appartment{})
-	if managerUUID != "" {
-		query = query.Where("manager_uuid = ?", managerUUID)
+	occupiedQuery := db.Model(&models.Appartment{}).Where("status = ?", "occupied")
+	if userUUID != "" {
+		occupiedQuery = occupiedQuery.Where("manager_uuid = ?", userUUID)
 	}
+	occupiedQuery.Count(&stats.OccupiedApartments)
 
-	// Statistiques de base
-	query.Count(&stats.TotalApartments)
-	query.Where("status = ?", "occupied").Count(&stats.OccupiedApartments)
-	query.Where("status = ?", "available").Count(&stats.AvailableApartments)
-	query.Where("status = ?", "maintenance").Count(&stats.MaintenanceApartments)
+	availableQuery := db.Model(&models.Appartment{}).Where("status = ?", "available")
+	if userUUID != "" {
+		availableQuery = availableQuery.Where("manager_uuid = ?", userUUID)
+	}
+	availableQuery.Count(&stats.AvailableApartments)
 
-	// Calculs des taux
+	maintenanceQuery := db.Model(&models.Appartment{}).Where("status = ?", "maintenance")
+	if userUUID != "" {
+		maintenanceQuery = maintenanceQuery.Where("manager_uuid = ?", userUUID)
+	}
+	maintenanceQuery.Count(&stats.MaintenanceApartments)
+
+	// Calculate occupancy and availability rates
 	if stats.TotalApartments > 0 {
 		stats.OccupancyRate = (float64(stats.OccupiedApartments) / float64(stats.TotalApartments)) * 100
 		stats.AvailabilityRate = (float64(stats.AvailableApartments) / float64(stats.TotalApartments)) * 100
 	}
 
-	// Loyer moyen
-	query.Select("COALESCE(AVG(monthly_rent), 0)").Row().Scan(&stats.AverageRent)
+	// Calculate average rent
+	avgRentQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		avgRentQuery = avgRentQuery.Where("manager_uuid = ?", userUUID)
+	}
+	avgRentQuery.Select("COALESCE(AVG(monthly_rent), 0)").Row().Scan(&stats.AverageRent)
 
-	// Revenus potentiels totaux
-	query.Select("COALESCE(SUM(monthly_rent), 0)").Row().Scan(&stats.TotalPotentialRevenue)
+	// Calculate total potential revenue (all apartments)
+	potentialRevenueQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		potentialRevenueQuery = potentialRevenueQuery.Where("manager_uuid = ?", userUUID)
+	}
+	potentialRevenueQuery.Select("COALESCE(SUM(monthly_rent), 0)").Row().Scan(&stats.TotalPotentialRevenue)
 
-	// Revenus perdus (appartements non occupés)
-	lostRevenueQuery := db.Model(&models.Appartment{}).
-		Where("status != ?", "occupied")
-	if managerUUID != "" {
-		lostRevenueQuery = lostRevenueQuery.Where("manager_uuid = ?", managerUUID)
+	// Calculate lost revenue from vacant apartments
+	lostRevenueQuery := db.Model(&models.Appartment{}).Where("status != ?", "occupied")
+	if userUUID != "" {
+		lostRevenueQuery = lostRevenueQuery.Where("manager_uuid = ?", userUUID)
 	}
 	lostRevenueQuery.Select("COALESCE(SUM(monthly_rent), 0)").Row().Scan(&stats.LostRevenue)
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
-		"message": "Occupancy stats retrieved successfully",
+		"message": "Occupancy statistics retrieved successfully",
 		"data":    stats,
 	})
 }
 
-// GetTopManagers - Classement des meilleurs managers
+// GetTopManagers returns the top performing managers
 func GetTopManagers(c *fiber.Ctx) error {
 	db := database.DB
 
-	period := c.Query("period", "month") // month, quarter, year
-	limit := c.Query("limit", "10")
+	// Parse query parameters
+	userUUID := c.Query("user_uuid", "")
+	startDate := c.Query("start_date", "")
+	endDate := c.Query("end_date", "")
 
-	limitInt, err := strconv.Atoi(limit)
-	if err != nil || limitInt <= 0 {
-		limitInt = 10
+	// Build manager query
+	managerQuery := db.Where("role IN ?", []string{"Manager"})
+	if userUUID != "" {
+		managerQuery = managerQuery.Where("uuid = ?", userUUID)
 	}
 
-	var dateFilter string
-	switch period {
-	case "month":
-		dateFilter = "DATE_TRUNC('month', c.created_at) = DATE_TRUNC('month', CURRENT_DATE)"
-	case "quarter":
-		dateFilter = "DATE_TRUNC('quarter', c.created_at) = DATE_TRUNC('quarter', CURRENT_DATE)"
-	case "year":
-		dateFilter = "DATE_TRUNC('year', c.created_at) = DATE_TRUNC('year', CURRENT_DATE)"
-	default:
-		dateFilter = "DATE_TRUNC('month', c.created_at) = DATE_TRUNC('month', CURRENT_DATE)"
-	}
+	var managers []models.User
+	managerQuery.Find(&managers)
 
-	type TopManager struct {
-		ManagerUUID    string  `json:"manager_uuid"`
-		ManagerName    string  `json:"manager_name"`
-		TotalRevenue   float64 `json:"total_revenue"`
-		NetProfit      float64 `json:"net_profit"`
-		ApartmentCount int64   `json:"apartment_count"`
-		OccupancyRate  float64 `json:"occupancy_rate"`
-		Efficiency     float64 `json:"efficiency"` // Net profit / Total apartments
-	}
+	var topManagers []models.TopManager
 
-	var results []TopManager
+	for _, manager := range managers {
+		var topMgr models.TopManager
+		topMgr.ManagerUUID = manager.UUID
+		topMgr.ManagerName = manager.Fullname
 
-	query := `
-        SELECT 
-            u.uuid as manager_uuid,
-            u.fullname as manager_name,
-            COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_usd ELSE 0 END), 0) as total_revenue,
-            COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_usd ELSE 0 END) - 
-                     SUM(CASE WHEN c.type = 'Expense' THEN c.device_usd ELSE 0 END), 0) as net_profit,
-            COUNT(DISTINCT a.uuid) as apartment_count,
-            CASE 
-                WHEN COUNT(DISTINCT a.uuid) > 0 THEN 
-                    (COUNT(DISTINCT CASE WHEN a.status = 'occupied' THEN a.uuid END)::float / COUNT(DISTINCT a.uuid)::float) * 100
-                ELSE 0 
-            END as occupancy_rate
-        FROM users u
-        LEFT JOIN appartments a ON u.uuid = a.manager_uuid
-        LEFT JOIN caisses c ON a.uuid = c.appartment_uuid AND ` + dateFilter + `
-        WHERE u.role IN ('Manager', 'Agent', 'Supervisor')
-        GROUP BY u.uuid, u.fullname
-        HAVING COUNT(DISTINCT a.uuid) > 0
-        ORDER BY net_profit DESC
-        LIMIT ?
-    `
+		// Count apartments
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ?", manager.UUID).
+			Count(&topMgr.ApartmentCount)
 
-	rows, err := db.Raw(query, limitInt).Rows()
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"status":  "error",
-			"message": "Failed to fetch top managers",
-			"error":   err.Error(),
-		})
-	}
-	defer rows.Close()
+		// Calculate financial stats with date filters
+		var totalRevenue, totalExpense float64
+		var occupiedCount int64
 
-	for rows.Next() {
-		var result TopManager
-		rows.Scan(
-			&result.ManagerUUID,
-			&result.ManagerName,
-			&result.TotalRevenue,
-			&result.NetProfit,
-			&result.ApartmentCount,
-			&result.OccupancyRate,
-		)
+		// Revenue query with date filters
+		revenueQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Income")
 
-		// Calculer l'efficacité
-		if result.ApartmentCount > 0 {
-			result.Efficiency = result.NetProfit / float64(result.ApartmentCount)
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				revenueQuery = revenueQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				revenueQuery = revenueQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		revenueQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalRevenue)
+
+		// Expense query with date filters
+		expenseQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Expense")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				expenseQuery = expenseQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				expenseQuery = expenseQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		expenseQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalExpense)
+
+		db.Model(&models.Appartment{}).
+			Where("manager_uuid = ? AND status = ?", manager.UUID, "occupied").
+			Count(&occupiedCount)
+
+		topMgr.TotalRevenue = totalRevenue
+		topMgr.NetProfit = totalRevenue - totalExpense
+
+		// Calculate occupancy rate
+		if topMgr.ApartmentCount > 0 {
+			topMgr.OccupancyRate = (float64(occupiedCount) / float64(topMgr.ApartmentCount)) * 100
 		}
 
-		results = append(results, result)
+		// Calculate efficiency (net profit per apartment)
+		if topMgr.ApartmentCount > 0 {
+			topMgr.Efficiency = topMgr.NetProfit / float64(topMgr.ApartmentCount)
+		}
+
+		topManagers = append(topManagers, topMgr)
 	}
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
 		"message": "Top managers retrieved successfully",
-		"data":    results,
+		"data":    topManagers,
 	})
 }
 
-// Fonctions utilitaires
+// Get appartment payment statistics by month
+func GetAppartmentStats(c *fiber.Ctx) error {
 
-func getMonthlyFinancialSummary(db *gorm.DB, managerUUID string) fiber.Map {
-	currentMonth := time.Now().Format("2006-01")
+	db := database.DB
 
-	var incomeUSD, expenseUSD float64
+	userUUID := c.Query("user_uuid", "")
 
-	// Requête de base pour le mois en cours
-	query := db.Model(&models.Caisse{}).
-		Where("DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)")
-
-	if managerUUID != "" {
-		query = query.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-			Where("appartments.manager_uuid = ?", managerUUID)
-	}
-
-	// Revenus du mois
-	query.Where("caisses.type = ?", "Income").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&incomeUSD)
-
-	// Dépenses du mois
-	query.Where("caisses.type = ?", "Expense").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&expenseUSD)
-
-	return fiber.Map{
-		"period":          "month",
-		"month":           currentMonth,
-		"income_usd":      incomeUSD,
-		"expense_usd":     expenseUSD,
-		"net_balance_usd": incomeUSD - expenseUSD,
-	}
-}
-
-func getQuarterlyFinancialSummary(db *gorm.DB, managerUUID string) fiber.Map {
-	currentQuarter := time.Now().Format("2006-Q1") // Approximation
-
-	var incomeUSD, expenseUSD float64
-
-	query := db.Model(&models.Caisse{}).
-		Where("DATE_TRUNC('quarter', created_at) = DATE_TRUNC('quarter', CURRENT_DATE)")
-
-	if managerUUID != "" {
-		query = query.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-			Where("appartments.manager_uuid = ?", managerUUID)
-	}
-
-	query.Where("caisses.type = ?", "Income").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&incomeUSD)
-	query.Where("caisses.type = ?", "Expense").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&expenseUSD)
-
-	return fiber.Map{
-		"period":          "quarter",
-		"quarter":         currentQuarter,
-		"income_usd":      incomeUSD,
-		"expense_usd":     expenseUSD,
-		"net_balance_usd": incomeUSD - expenseUSD,
-	}
-}
-
-func getYearlyFinancialSummary(db *gorm.DB, managerUUID string) fiber.Map {
-	currentYear := time.Now().Year()
-
-	var incomeUSD, expenseUSD float64
-
-	query := db.Model(&models.Caisse{}).
-		Where("DATE_TRUNC('year', created_at) = DATE_TRUNC('year', CURRENT_DATE)")
-
-	if managerUUID != "" {
-		query = query.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
-			Where("appartments.manager_uuid = ?", managerUUID)
-	}
-
-	query.Where("caisses.type = ?", "Income").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&incomeUSD)
-	query.Where("caisses.type = ?", "Expense").
-		Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&expenseUSD)
-
-	return fiber.Map{
-		"period":          "year",
-		"year":            currentYear,
-		"income_usd":      incomeUSD,
-		"expense_usd":     expenseUSD,
-		"net_balance_usd": incomeUSD - expenseUSD,
-	}
-}
-
-func getTopApartmentsByRevenue(db *gorm.DB, managerUUID, startDate, endDate string) []ApartmentRevenue {
-	var results []ApartmentRevenue
-
-	query := `
-        SELECT 
-            a.uuid,
-            a.name,
-            a.number,
-            a.monthly_rent,
-            COALESCE(SUM(c.device_usd), 0) as total_revenue,
-            a.status,
-            u.fullname as manager_name
-        FROM appartments a
-        LEFT JOIN caisses c ON a.uuid = c.appartment_uuid AND c.type = 'Income'
-        LEFT JOIN users u ON a.manager_uuid = u.uuid
-        WHERE 1=1
-    `
-
-	args := []interface{}{}
-
-	if managerUUID != "" {
-		query += " AND a.manager_uuid = ?"
-		args = append(args, managerUUID)
-	}
-
-	if startDate != "" {
-		query += " AND c.created_at >= ?"
-		args = append(args, startDate)
-	}
-
-	if endDate != "" {
-		query += " AND c.created_at < ?"
-		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
-			endDateTime := parsedEndDate.Add(24 * time.Hour)
-			args = append(args, endDateTime)
+	// Obtenir l'année courante ou depuis les paramètres de requête
+	year := time.Now().Year()
+	if yearParam := c.Query("year"); yearParam != "" {
+		if parsedYear, err := strconv.Atoi(yearParam); err == nil && parsedYear > 0 {
+			year = parsedYear
 		}
 	}
 
-	query += `
-        GROUP BY a.uuid, a.name, a.number, a.monthly_rent, a.status, u.fullname
-        ORDER BY total_revenue DESC
-        LIMIT 10
-    `
-
-	rows, err := db.Raw(query, args...).Rows()
-	if err != nil {
-		return results
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var result ApartmentRevenue
-		rows.Scan(
-			&result.UUID,
-			&result.Name,
-			&result.Number,
-			&result.MonthlyRent,
-			&result.TotalRevenue,
-			&result.Status,
-			&result.ManagerName,
-		)
-		results = append(results, result)
+	// Récupérer les appartements avec filtre optionnel
+	var appartments []models.Appartment
+	appartmentQuery := db.Model(&models.Appartment{})
+	if userUUID != "" {
+		appartmentQuery = appartmentQuery.Where("manager_uuid = ?", userUUID)
 	}
 
-	return results
-}
-
-func getManagerStats(db *gorm.DB, startDate, endDate string) []ManagerStats {
-	var results []ManagerStats
-
-	query := `
-        SELECT 
-            u.uuid as manager_uuid,
-            u.fullname as manager_name,
-            COUNT(DISTINCT a.uuid) as total_apartments,
-            COUNT(DISTINCT CASE WHEN a.status = 'available' THEN a.uuid END) as available_apartments,
-            COUNT(DISTINCT CASE WHEN a.status = 'occupied' THEN a.uuid END) as occupied_apartments,
-            COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_usd ELSE 0 END), 0) as total_income_usd,
-            COALESCE(SUM(CASE WHEN c.type = 'Expense' THEN c.device_usd ELSE 0 END), 0) as total_expense_usd,
-            COALESCE(SUM(a.monthly_rent), 0) as monthly_revenue_target
-        FROM users u
-        LEFT JOIN appartments a ON u.uuid = a.manager_uuid
-        LEFT JOIN caisses c ON a.uuid = c.appartment_uuid
-        WHERE u.role IN ('Manager', 'Agent', 'Supervisor')
-    `
-
-	args := []interface{}{}
-
-	if startDate != "" {
-		query += " AND (c.created_at IS NULL OR c.created_at >= ?)"
-		args = append(args, startDate)
+	if err := appartmentQuery.Find(&appartments).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to fetch appartments",
+			"error":   err.Error(),
+		})
 	}
 
-	if endDate != "" {
-		query += " AND (c.created_at IS NULL OR c.created_at < ?)"
-		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
-			endDateTime := parsedEndDate.Add(24 * time.Hour)
-			args = append(args, endDateTime)
+	if len(appartments) == 0 {
+		return c.Status(404).JSON(fiber.Map{
+			"status":  "error",
+			"message": "No appartments found",
+			"data":    nil,
+		})
+	}
+
+	// Initialiser les statistiques pour les 12 mois
+	monthlyStats := make(map[string]map[string]float64)
+	months := []string{"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December"}
+
+	for _, month := range months {
+		monthlyStats[month] = map[string]float64{
+			"total_cdf": 0.0,
+			"total_usd": 0.0,
 		}
 	}
 
-	query += `
-        GROUP BY u.uuid, u.fullname
-        HAVING COUNT(DISTINCT a.uuid) > 0
-        ORDER BY COALESCE(SUM(CASE WHEN c.type = 'Income' THEN c.device_usd ELSE 0 END), 0) DESC
-    `
+	// Récupérer toutes les entrées (Income) de la caisse pour ces appartements
+	var caisses []models.Caisse
+	startDate := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(year, 12, 31, 23, 59, 59, 0, time.UTC)
 
-	rows, err := db.Raw(query, args...).Rows()
+	caisseQuery := db.Where("type = ? AND created_at >= ? AND created_at <= ?", "Income", startDate, endDate)
+
+	// Filtrer par appartements si nécessaire
+	if userUUID != "" {
+		var appartmentUUIDs []string
+		for _, apt := range appartments {
+			appartmentUUIDs = append(appartmentUUIDs, apt.UUID)
+		}
+		caisseQuery = caisseQuery.Where("appartment_uuid IN ?", appartmentUUIDs)
+	}
+
+	err := caisseQuery.Find(&caisses).Error
 	if err != nil {
-		return results
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var result ManagerStats
-		rows.Scan(
-			&result.ManagerUUID,
-			&result.ManagerName,
-			&result.TotalApartments,
-			&result.AvailableApartments,
-			&result.OccupiedApartments,
-			&result.TotalIncomeUSD,
-			&result.TotalExpenseUSD,
-			&result.MonthlyRevenueTarget,
-		)
-
-		// Calculer la balance nette
-		result.NetBalanceUSD = result.TotalIncomeUSD - result.TotalExpenseUSD
-
-		results = append(results, result)
+		return c.Status(500).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to fetch payment statistics",
+			"error":   err.Error(),
+		})
 	}
 
-	return results
+	// Calculer les totaux par mois
+	for _, caisse := range caisses {
+		monthIndex := int(caisse.CreatedAt.Month()) - 1
+		if monthIndex >= 0 && monthIndex < 12 {
+			monthName := months[monthIndex]
+			monthlyStats[monthName]["total_cdf"] += caisse.DeviceCDF
+			monthlyStats[monthName]["total_usd"] += caisse.DeviceUSD
+		}
+	}
+
+	// Calculer les totaux annuels
+	var totalYearCDF, totalYearUSD float64
+	for _, month := range months {
+		totalYearCDF += monthlyStats[month]["total_cdf"]
+		totalYearUSD += monthlyStats[month]["total_usd"]
+	}
+
+	// Préparer la réponse
+	response := map[string]interface{}{
+		"year":          year,
+		"monthly_stats": monthlyStats,
+		"yearly_totals": map[string]float64{
+			"total_cdf": totalYearCDF,
+			"total_usd": totalYearUSD,
+		},
+		"appartment_count": len(appartments),
+		"filter_applied":   userUUID != "",
+		"currency_info": map[string]string{
+			"cdf": "Francs Congolais",
+			"usd": "US Dollars",
+		},
+	}
+
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"message": "Appartment payment statistics retrieved successfully",
+		"data":    response,
+	})
 }

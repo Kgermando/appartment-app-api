@@ -75,8 +75,7 @@ func GetPaginatedUsers(c *fiber.Ctx) error {
 func GetAllUsers(c *fiber.Ctx) error {
 	db := database.DB
 	var users []models.User
-	db.Where("role = ?", "Manager Général").
-	Where("role = ?", "Manager").Find(&users)
+	db.Where("role = ?", "Manager").Find(&users)
 	return c.JSON(fiber.Map{
 		"status":  "success",
 		"message": "All users",

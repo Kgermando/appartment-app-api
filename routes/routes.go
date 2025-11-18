@@ -61,22 +61,19 @@ func Setup(app *fiber.App) {
 	c.Get("/get/:uuid", caisses.GetCaisse)
 	c.Post("/create", caisses.CreateCaisse)
 	c.Put("/update/:uuid", caisses.UpdateCaisse)
-	c.Delete("/delete/:uuid", caisses.DeleteCaisse)
-
-	// Financial endpoints
+	c.Delete("/delete/:uuid", caisses.DeleteCaisse) 
 	c.Get("/totals/global", caisses.GetGlobalTotals)                   // Route statique en premier
 	c.Get("/totals/manager/:manager_uuid", caisses.GetTotalsByManager) // Route avec paramètre après
 	c.Get("/balance/:appartment_uuid", caisses.GetAppartmentBalance)
-	c.Post("/convert", caisses.ConvertCurrency)
 
 	// Dashboard controller
 	d := api.Group("/dashboard")
-	d.Get("/stats", dashboard.GetDashboardStats)                        // Dashboard principal avec filtres
-	d.Get("/trends", dashboard.GetMonthlyTrends)                        // Tendances mensuelles
-	d.Get("/managers", dashboard.GetManagerComparison)                  // Comparaison entre managers
-	d.Get("/apartments/performance", dashboard.GetApartmentPerformance) // Performance des appartements
-	d.Get("/financial", dashboard.GetFinancialSummary)                  // Résumé financier détaillé
-	d.Get("/occupancy", dashboard.GetOccupancyStats)                    // Statistiques d'occupation
-	d.Get("/top-managers", dashboard.GetTopManagers)                    // Classement des meilleurs managers
+	d.Get("/stats", dashboard.GetDashboardStats)                 // Statistiques générales
+	d.Get("/apartment-revenues", dashboard.GetApartmentRevenues) // Revenus par appartement
+	d.Get("/manager-stats", dashboard.GetManagerStats)           // Statistiques par manager
+	d.Get("/monthly-trends", dashboard.GetMonthlyTrends)         // Tendances mensuelles
+	d.Get("/occupancy-stats", dashboard.GetOccupancyStats)       // Statistiques d'occupation
+	d.Get("/top-managers", dashboard.GetTopManagers)             // Classement des meilleurs managers
+	d.Get("/appartment-stats", dashboard.GetAppartmentStats)     // Statistiques de paiement par appartement
 
 }
