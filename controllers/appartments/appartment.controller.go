@@ -218,18 +218,20 @@ func GetAppartmentStats(c *fiber.Ctx) error {
 
 	for _, month := range months {
 		monthlyStats[month] = map[string]float64{
-			"total_cdf": 0.0,
-			"total_usd": 0.0,
+			"income_cdf":  0.0,
+			"income_usd":  0.0,
+			"expense_cdf": 0.0,
+			"expense_usd": 0.0,
 		}
 	}
 
-	// Récupérer toutes les entrées (Income) de la caisse pour cet appartement
+	// Récupérer toutes les entrées de la caisse pour cet appartement
 	var caisses []models.Caisse
 	startDate := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 	endDate := time.Date(year, 12, 31, 23, 59, 59, 0, time.UTC)
 
-	err := db.Where("appartment_uuid = ? AND type = ? AND created_at >= ? AND created_at <= ?",
-		uuid, "Income", startDate, endDate).Find(&caisses).Error
+	err := db.Where("appartment_uuid = ? AND created_at >= ? AND created_at <= ?",
+		uuid, startDate, endDate).Find(&caisses).Error
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -244,16 +246,31 @@ func GetAppartmentStats(c *fiber.Ctx) error {
 		monthIndex := int(caisse.CreatedAt.Month()) - 1
 		if monthIndex >= 0 && monthIndex < 12 {
 			monthName := months[monthIndex]
-			monthlyStats[monthName]["total_cdf"] += caisse.DeviceCDF
-			monthlyStats[monthName]["total_usd"] += caisse.DeviceUSD
+			switch caisse.Type {
+			case "Income":
+				monthlyStats[monthName]["income_cdf"] += caisse.DeviceCDF
+				monthlyStats[monthName]["income_usd"] += caisse.DeviceUSD
+			case "Expense":
+				monthlyStats[monthName]["expense_cdf"] += caisse.DeviceCDF
+				monthlyStats[monthName]["expense_usd"] += caisse.DeviceUSD
+			}
 		}
 	}
 
-	// Calculer les totaux annuels
-	var totalYearCDF, totalYearUSD float64
+	// Calculer les totaux mensuels et annuels
+	var totalYearIncomeCDF, totalYearIncomeUSD, totalYearExpenseCDF, totalYearExpenseUSD float64
 	for _, month := range months {
-		totalYearCDF += monthlyStats[month]["total_cdf"]
-		totalYearUSD += monthlyStats[month]["total_usd"]
+		// Calculer les totaux pour chaque mois
+		monthlyStats[month]["total_income_cdf"] = monthlyStats[month]["income_cdf"]
+		monthlyStats[month]["total_income_usd"] = monthlyStats[month]["income_usd"]
+		monthlyStats[month]["total_expense_cdf"] = monthlyStats[month]["expense_cdf"]
+		monthlyStats[month]["total_expense_usd"] = monthlyStats[month]["expense_usd"]
+
+		// Calculer les totaux annuels
+		totalYearIncomeCDF += monthlyStats[month]["income_cdf"]
+		totalYearIncomeUSD += monthlyStats[month]["income_usd"]
+		totalYearExpenseCDF += monthlyStats[month]["expense_cdf"]
+		totalYearExpenseUSD += monthlyStats[month]["expense_usd"]
 	}
 
 	// Préparer la réponse
@@ -279,8 +296,10 @@ func GetAppartmentStats(c *fiber.Ctx) error {
 		"year":          year,
 		"monthly_stats": monthlyStats,
 		"yearly_totals": map[string]float64{
-			"total_cdf": totalYearCDF,
-			"total_usd": totalYearUSD,
+			"total_income_cdf":  totalYearIncomeCDF,
+			"total_income_usd":  totalYearIncomeUSD,
+			"total_expense_cdf": totalYearExpenseCDF,
+			"total_expense_usd": totalYearExpenseUSD,
 		},
 		"currency_info": map[string]string{
 			"cdf": "Francs Congolais",

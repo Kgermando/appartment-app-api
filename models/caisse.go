@@ -19,6 +19,8 @@ type Caisse struct {
 	DeviceCDF float64 `gorm:"default:0" json:"device_cdf"`
 	DeviceUSD float64 `gorm:"default:0" json:"device_usd"`
 
+	Motif string `gorm:"not null" json:"motif"`
+
 	Signature string `gorm:"not null" json:"signature"` // Pour savoir qui q fait des entrees et des sorties
 }
 

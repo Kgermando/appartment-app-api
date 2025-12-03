@@ -54,17 +54,14 @@ func Setup(app *fiber.App) {
 
 	// Caisses controller
 	c := api.Group("/caisses")
-	c.Get("/all/paginate", caisses.GetPaginatedCaissesManagerGeneral)     // Route statique en premier
+	c.Get("/all/paginate", caisses.GetPaginatedCaissesSuperAdmin)     // Route statique en premier
 	c.Get("/all/:appartment_uuid/paginate", caisses.GetPaginatedCaisses)  // Route avec paramètre + suffixe
 	c.Get("/all/:appartment_uuid", caisses.GetAllCaissesByAppartmentUUID) // Route dynamique seule
 	c.Get("/all", caisses.GetAllCaisses)
 	c.Get("/get/:uuid", caisses.GetCaisse)
 	c.Post("/create", caisses.CreateCaisse)
 	c.Put("/update/:uuid", caisses.UpdateCaisse)
-	c.Delete("/delete/:uuid", caisses.DeleteCaisse) 
-	c.Get("/totals/global", caisses.GetGlobalTotals)                   // Route statique en premier
-	c.Get("/totals/manager/:manager_uuid", caisses.GetTotalsByManager) // Route avec paramètre après
-	c.Get("/balance/:appartment_uuid", caisses.GetAppartmentBalance)
+	c.Delete("/delete/:uuid", caisses.DeleteCaisse)
 
 	// Dashboard controller
 	d := api.Group("/dashboard")
