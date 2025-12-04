@@ -9,35 +9,35 @@ type DashboardStats struct {
 
 	// Statistiques financières
 	TotalIncomeUSD  float64 `json:"total_income_usd"`
+	TotalIncomeCDF  float64 `json:"total_income_cdf"`
 	TotalExpenseUSD float64 `json:"total_expense_usd"`
-	NetBalanceUSD   float64 `json:"net_balance_usd"`
-
-	// Statistiques de revenus
-	MonthlyRevenueTarget float64 `json:"monthly_revenue_target"`
-	ActualMonthlyRevenue float64 `json:"actual_monthly_revenue"`
-	RevenuePercentage    float64 `json:"revenue_percentage"`
+	TotalExpenseCDF float64 `json:"total_expense_cdf"`
 }
 
 type ApartmentRevenue struct {
-	UUID         string  `json:"uuid"`
-	Name         string  `json:"name"`
-	Number       string  `json:"number"`
-	MonthlyRent  float64 `json:"monthly_rent"`
-	TotalRevenue float64 `json:"total_revenue"`
-	Status       string  `json:"status"`
-	ManagerName  string  `json:"manager_name"`
+	UUID            string  `json:"uuid"`
+	Name            string  `json:"name"`
+	Number          string  `json:"number"`
+	MonthlyRent     float64 `json:"monthly_rent"`
+	TotalIncomeUSD  float64 `json:"total_income_usd"`
+	TotalIncomeCDF  float64 `json:"total_income_cdf"`
+	TotalExpenseUSD float64 `json:"total_expense_usd"`
+	TotalExpenseCDF float64 `json:"total_expense_cdf"`
+
+	Status      string `json:"status"`
+	ManagerName string `json:"manager_name"`
 }
 
 type ManagerStats struct {
-	ManagerUUID          string  `json:"manager_uuid"`
-	ManagerName          string  `json:"manager_name"`
-	TotalApartments      int64   `json:"total_apartments"`
-	AvailableApartments  int64   `json:"available_apartments"`
-	OccupiedApartments   int64   `json:"occupied_apartments"`
-	TotalIncomeUSD       float64 `json:"total_income_usd"`
-	TotalExpenseUSD      float64 `json:"total_expense_usd"`
-	NetBalanceUSD        float64 `json:"net_balance_usd"`
-	MonthlyRevenueTarget float64 `json:"monthly_revenue_target"`
+	ManagerUUID         string  `json:"manager_uuid"`
+	ManagerName         string  `json:"manager_name"`
+	TotalApartments     int64   `json:"total_apartments"`
+	AvailableApartments int64   `json:"available_apartments"`
+	OccupiedApartments  int64   `json:"occupied_apartments"`
+	TotalIncomeUSD      float64 `json:"total_income_usd"`
+	TotalIncomeCDF      float64 `json:"total_income_cdf"`
+	TotalExpenseUSD     float64 `json:"total_expense_usd"`
+	TotalExpenseCDF     float64 `json:"total_expense_cdf"`
 }
 
 type MonthlyTrend struct {

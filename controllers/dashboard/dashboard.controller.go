@@ -46,8 +46,8 @@ func GetDashboardStats(c *fiber.Ctx) error {
 	}
 	maintenanceQuery.Count(&stats.MaintenanceApartments)
 
-	// 2. Statistiques financières en USD avec filtres optionnels
-	var totalIncomeUSD, totalExpenseUSD float64
+	// 2. Statistiques financières en USD et CDF avec filtres optionnels
+	var totalIncomeUSD, totalExpenseUSD, totalIncomeCDF, totalExpenseCDF float64
 
 	// Build income query (filtre par user_uuid et dates si fournis)
 	incomeQuery := db.Model(&models.Caisse{}).Where("type = ?", "Income")
@@ -68,6 +68,25 @@ func GetDashboardStats(c *fiber.Ctx) error {
 	}
 	incomeQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalIncomeUSD)
 
+	// Income CDF
+	incomeCDFQuery := db.Model(&models.Caisse{}).Where("type = ?", "Income")
+	if userUUID != "" {
+		incomeCDFQuery = incomeCDFQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ?", userUUID)
+	}
+	if startDate != "" {
+		if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+			incomeCDFQuery = incomeCDFQuery.Where("caisses.created_at >= ?", parsedStartDate)
+		}
+	}
+	if endDate != "" {
+		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+			endDateTime := parsedEndDate.Add(24 * time.Hour)
+			incomeCDFQuery = incomeCDFQuery.Where("caisses.created_at < ?", endDateTime)
+		}
+	}
+	incomeCDFQuery.Select("COALESCE(SUM(device_cdf), 0)").Row().Scan(&totalIncomeCDF)
+
 	// Build expense query (filtre par user_uuid et dates si fournis)
 	expenseQuery := db.Model(&models.Caisse{}).Where("type = ?", "Expense")
 	if userUUID != "" {
@@ -87,25 +106,29 @@ func GetDashboardStats(c *fiber.Ctx) error {
 	}
 	expenseQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalExpenseUSD)
 
-	stats.TotalIncomeUSD = totalIncomeUSD
-	stats.TotalExpenseUSD = totalExpenseUSD
-	stats.NetBalanceUSD = totalIncomeUSD - totalExpenseUSD
-
-	// 3. Statistiques de revenus mensuels
-	revenueQuery := db.Model(&models.Appartment{})
+	// Expense CDF
+	expenseCDFQuery := db.Model(&models.Caisse{}).Where("type = ?", "Expense")
 	if userUUID != "" {
-		revenueQuery = revenueQuery.Where("manager_uuid = ?", userUUID)
+		expenseCDFQuery = expenseCDFQuery.Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ?", userUUID)
 	}
-	revenueQuery.Select("COALESCE(SUM(monthly_rent), 0)").Row().Scan(&stats.MonthlyRevenueTarget)
-
-	stats.ActualMonthlyRevenue = totalIncomeUSD
-
-	// Calculer le pourcentage de revenus atteint
-	if stats.MonthlyRevenueTarget > 0 {
-		stats.RevenuePercentage = (stats.ActualMonthlyRevenue / stats.MonthlyRevenueTarget) * 100
-	} else {
-		stats.RevenuePercentage = 0
+	if startDate != "" {
+		if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+			expenseCDFQuery = expenseCDFQuery.Where("caisses.created_at >= ?", parsedStartDate)
+		}
 	}
+	if endDate != "" {
+		if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+			endDateTime := parsedEndDate.Add(24 * time.Hour)
+			expenseCDFQuery = expenseCDFQuery.Where("caisses.created_at < ?", endDateTime)
+		}
+	}
+	expenseCDFQuery.Select("COALESCE(SUM(device_cdf), 0)").Row().Scan(&totalExpenseCDF)
+
+	stats.TotalIncomeUSD = totalIncomeUSD
+	stats.TotalIncomeCDF = totalIncomeCDF
+	stats.TotalExpenseUSD = totalExpenseUSD
+	stats.TotalExpenseCDF = totalExpenseCDF
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
@@ -135,34 +158,87 @@ func GetApartmentRevenues(c *fiber.Ctx) error {
 	var revenues []models.ApartmentRevenue
 
 	for _, apt := range apartments {
-		var totalRevenue float64
+		var totalIncomeUSD, totalIncomeCDF, totalExpenseUSD, totalExpenseCDF float64
 
-		// Build revenue query with date filters
-		revenueQuery := db.Model(&models.Caisse{}).
+		// Build income query with date filters
+		incomeQuery := db.Model(&models.Caisse{}).
 			Where("appartment_uuid = ? AND type = ?", apt.UUID, "Income")
 
 		if startDate != "" {
 			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
-				revenueQuery = revenueQuery.Where("created_at >= ?", parsedStartDate)
+				incomeQuery = incomeQuery.Where("created_at >= ?", parsedStartDate)
 			}
 		}
 		if endDate != "" {
 			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
 				endDateTime := parsedEndDate.Add(24 * time.Hour)
-				revenueQuery = revenueQuery.Where("created_at < ?", endDateTime)
+				incomeQuery = incomeQuery.Where("created_at < ?", endDateTime)
 			}
 		}
 
-		revenueQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalRevenue)
+		incomeQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalIncomeUSD)
+
+		// Income CDF
+		incomeCDFQuery := db.Model(&models.Caisse{}).
+			Where("appartment_uuid = ? AND type = ?", apt.UUID, "Income")
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				incomeCDFQuery = incomeCDFQuery.Where("created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				incomeCDFQuery = incomeCDFQuery.Where("created_at < ?", endDateTime)
+			}
+		}
+		incomeCDFQuery.Select("COALESCE(SUM(device_cdf), 0)").Row().Scan(&totalIncomeCDF)
+
+		// Build expense query with date filters
+		expenseQuery := db.Model(&models.Caisse{}).
+			Where("appartment_uuid = ? AND type = ?", apt.UUID, "Expense")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				expenseQuery = expenseQuery.Where("created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				expenseQuery = expenseQuery.Where("created_at < ?", endDateTime)
+			}
+		}
+
+		expenseQuery.Select("COALESCE(SUM(device_usd), 0)").Row().Scan(&totalExpenseUSD)
+
+		// Expense CDF
+		expenseCDFQuery := db.Model(&models.Caisse{}).
+			Where("appartment_uuid = ? AND type = ?", apt.UUID, "Expense")
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				expenseCDFQuery = expenseCDFQuery.Where("created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				expenseCDFQuery = expenseCDFQuery.Where("created_at < ?", endDateTime)
+			}
+		}
+		expenseCDFQuery.Select("COALESCE(SUM(device_cdf), 0)").Row().Scan(&totalExpenseCDF)
 
 		revenue := models.ApartmentRevenue{
-			UUID:         apt.UUID,
-			Name:         apt.Name,
-			Number:       apt.Number,
-			MonthlyRent:  apt.MonthlyRent,
-			TotalRevenue: totalRevenue,
-			Status:       apt.Status,
-			ManagerName:  apt.Manager.Fullname,
+			UUID:            apt.UUID,
+			Name:            apt.Name,
+			Number:          apt.Number,
+			MonthlyRent:     apt.MonthlyRent,
+			TotalIncomeUSD:  totalIncomeUSD,
+			TotalIncomeCDF:  totalIncomeCDF,
+			TotalExpenseUSD: totalExpenseUSD,
+			TotalExpenseCDF: totalExpenseCDF,
+			Status:          apt.Status,
+			ManagerName:     apt.Manager.Fullname,
 		}
 
 		revenues = append(revenues, revenue)
@@ -214,9 +290,9 @@ func GetManagerStats(c *fiber.Ctx) error {
 			Count(&stats.OccupiedApartments)
 
 		// Calculate financial stats for this manager with date filters
-		var totalIncomeUSD, totalExpenseUSD float64
+		var totalIncomeUSD, totalIncomeCDF, totalExpenseUSD, totalExpenseCDF float64
 
-		// Income query
+		// Income USD query
 		incomeQuery := db.Table("caisses").
 			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
 			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Income")
@@ -234,7 +310,25 @@ func GetManagerStats(c *fiber.Ctx) error {
 		}
 		incomeQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalIncomeUSD)
 
-		// Expense query
+		// Income CDF query
+		incomeCDFQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Income")
+
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				incomeCDFQuery = incomeCDFQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				incomeCDFQuery = incomeCDFQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		incomeCDFQuery.Select("COALESCE(SUM(caisses.device_cdf), 0)").Row().Scan(&totalIncomeCDF)
+
+		// Expense USD query
 		expenseQuery := db.Table("caisses").
 			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
 			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Expense")
@@ -252,15 +346,28 @@ func GetManagerStats(c *fiber.Ctx) error {
 		}
 		expenseQuery.Select("COALESCE(SUM(caisses.device_usd), 0)").Row().Scan(&totalExpenseUSD)
 
-		stats.TotalIncomeUSD = totalIncomeUSD
-		stats.TotalExpenseUSD = totalExpenseUSD
-		stats.NetBalanceUSD = totalIncomeUSD - totalExpenseUSD
+		// Expense CDF query
+		expenseCDFQuery := db.Table("caisses").
+			Joins("JOIN appartments ON caisses.appartment_uuid = appartments.uuid").
+			Where("appartments.manager_uuid = ? AND caisses.type = ?", manager.UUID, "Expense")
 
-		// Calculate monthly revenue target
-		db.Model(&models.Appartment{}).
-			Where("manager_uuid = ?", manager.UUID).
-			Select("COALESCE(SUM(monthly_rent), 0)").
-			Row().Scan(&stats.MonthlyRevenueTarget)
+		if startDate != "" {
+			if parsedStartDate, err := time.Parse("2006-01-02", startDate); err == nil {
+				expenseCDFQuery = expenseCDFQuery.Where("caisses.created_at >= ?", parsedStartDate)
+			}
+		}
+		if endDate != "" {
+			if parsedEndDate, err := time.Parse("2006-01-02", endDate); err == nil {
+				endDateTime := parsedEndDate.Add(24 * time.Hour)
+				expenseCDFQuery = expenseCDFQuery.Where("caisses.created_at < ?", endDateTime)
+			}
+		}
+		expenseCDFQuery.Select("COALESCE(SUM(caisses.device_cdf), 0)").Row().Scan(&totalExpenseCDF)
+
+		stats.TotalIncomeUSD = totalIncomeUSD
+		stats.TotalIncomeCDF = totalIncomeCDF
+		stats.TotalExpenseUSD = totalExpenseUSD
+		stats.TotalExpenseCDF = totalExpenseCDF
 
 		managerStats = append(managerStats, stats)
 	}
