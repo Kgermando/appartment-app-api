@@ -69,7 +69,7 @@ func Setup(app *fiber.App) {
 	d.Get("/apartment-revenues", dashboard.GetApartmentRevenues) // Revenus par appartement
 	d.Get("/manager-stats", dashboard.GetManagerStats)           // Statistiques par manager
 	d.Get("/monthly-trends", dashboard.GetMonthlyTrends)         // Tendances mensuelles
-	d.Get("/appartment-stats", dashboard.GetAppartmentStats)     // Statistiques de paiement par appartement
+	d.Get("/appartments-stats", dashboard.GetAppartmentStats)     // Statistiques de paiement par appartement
 	d.Get("/occupancy-stats", dashboard.GetOccupancyStats)       // Statistiques d'occupation
 	d.Get("/top-managers", dashboard.GetTopManagers)             // Classement des meilleurs managers
 
