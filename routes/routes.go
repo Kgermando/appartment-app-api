@@ -54,7 +54,7 @@ func Setup(app *fiber.App) {
 
 	// Caisses controller
 	c := api.Group("/caisses")
-	c.Get("/all/paginate", caisses.GetPaginatedCaissesSuperAdmin)     // Route statique en premier
+	c.Get("/all/paginate", caisses.GetPaginatedCaissesSuperAdmin)         // Route statique en premier
 	c.Get("/all/:appartment_uuid/paginate", caisses.GetPaginatedCaisses)  // Route avec paramètre + suffixe
 	c.Get("/all/:appartment_uuid", caisses.GetAllCaissesByAppartmentUUID) // Route dynamique seule
 	c.Get("/all", caisses.GetAllCaisses)
@@ -69,8 +69,8 @@ func Setup(app *fiber.App) {
 	d.Get("/apartment-revenues", dashboard.GetApartmentRevenues) // Revenus par appartement
 	d.Get("/manager-stats", dashboard.GetManagerStats)           // Statistiques par manager
 	d.Get("/monthly-trends", dashboard.GetMonthlyTrends)         // Tendances mensuelles
+	d.Get("/appartment-stats", dashboard.GetAppartmentStats)     // Statistiques de paiement par appartement
 	d.Get("/occupancy-stats", dashboard.GetOccupancyStats)       // Statistiques d'occupation
 	d.Get("/top-managers", dashboard.GetTopManagers)             // Classement des meilleurs managers
-	d.Get("/appartment-stats", dashboard.GetAppartmentStats)     // Statistiques de paiement par appartement
 
 }
